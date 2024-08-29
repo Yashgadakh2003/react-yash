@@ -37,7 +37,7 @@ import {
   prepareDestination,
 } from '../../../shared/lib/router/utils/prepare-destination'
 import type { TLSSocket } from 'tls'
-import { NEXT_ROUTER_STATE_TREE } from '../../../client/components/app-router-headers'
+import { NEXT_ROUTER_STATE_TREE_HEADER } from '../../../client/components/app-router-headers'
 import { getSelectedParams } from '../../../client/components/router-reducer/compute-changed-path'
 import { isInterceptionRouteRewrite } from '../../../lib/generate-interception-routes-rewrites'
 import { parseAndValidateFlightRouterState } from '../../app-render/parse-and-validate-flight-router-state'
@@ -395,6 +395,17 @@ export function getResolveRoutes(
               normalized = normalizers.postponed.normalize(normalized, true)
             }
 
+            if (config.i18n) {
+              const curLocaleResult = normalizeLocalePath(
+                normalized,
+                config.i18n.locales
+              )
+
+              if (curLocaleResult.detectedLocale) {
+                parsedUrl.query.__nextLocale = curLocaleResult.detectedLocale
+              }
+            }
+
             // If we updated the pathname, and it had a base path, re-add the
             // base path.
             if (updated) {
@@ -701,7 +712,7 @@ export function getResolveRoutes(
             // This attempts to extract the dynamic params from the provided router state.
             if (isInterceptionRouteRewrite(route as Rewrite)) {
               const stateHeader =
-                req.headers[NEXT_ROUTER_STATE_TREE.toLowerCase()]
+                req.headers[NEXT_ROUTER_STATE_TREE_HEADER.toLowerCase()]
 
               if (stateHeader) {
                 rewriteParams = {

@@ -249,6 +249,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
   private pagesMapping: { [key: string]: string } = {}
   private appDir?: string
   private telemetry: Telemetry
+  private resetFetch: () => void
   private versionInfo: VersionInfo = {
     staleness: 'unknown',
     installed: '0.0.0',
@@ -274,6 +275,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
       rewrites,
       appDir,
       telemetry,
+      resetFetch,
     }: {
       config: NextConfigComplete
       pagesDir?: string
@@ -284,6 +286,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
       rewrites: CustomRoutes['rewrites']
       appDir?: string
       telemetry: Telemetry
+      resetFetch: () => void
     }
   ) {
     this.hasAmpEntrypoints = false
@@ -301,6 +304,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
     this.edgeServerStats = null
     this.serverPrevDocumentHash = null
     this.telemetry = telemetry
+    this.resetFetch = resetFetch
 
     this.config = config
     this.previewProps = previewProps
@@ -404,10 +408,16 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
     })
   }
 
-  public onHMR(req: IncomingMessage, _socket: Duplex, head: Buffer) {
+  public onHMR(
+    req: IncomingMessage,
+    _socket: Duplex,
+    head: Buffer,
+    callback: (client: ws.WebSocket) => void
+  ) {
     wsServer.handleUpgrade(req, req.socket, head, (client) => {
       this.webpackHotMiddleware?.onHMR(client)
       this.onDemandEntries?.onHMR(client, () => this.hmrServerError)
+      callback(client)
 
       client.addEventListener('message', ({ data }) => {
         data = typeof data !== 'string' ? data.toString() : data
@@ -1359,6 +1369,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
         changedCSSImportPages.size ||
         reloadAfterInvalidation
       ) {
+        this.resetFetch()
         this.refreshServerComponents()
       }
 

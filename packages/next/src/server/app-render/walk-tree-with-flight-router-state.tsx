@@ -2,9 +2,9 @@ import type {
   FlightDataPath,
   FlightRouterState,
   FlightSegmentPath,
+  PreloadCallbacks,
   Segment,
 } from './types'
-import type React from 'react'
 import {
   canSegmentBeOverridden,
   matchSegment,
@@ -16,12 +16,10 @@ import {
   addSearchParamsIfPageSegment,
   createFlightRouterStateFromLoaderTree,
 } from './create-flight-router-state-from-loader-tree'
-import { parseLoaderTree } from './parse-loader-tree'
 import type { CreateSegmentPath, AppRenderContext } from './app-render'
-import { getLayerAssets } from './get-layer-assets'
 import { hasLoadingComponentInTree } from './has-loading-component-in-tree'
-import { createComponentTree } from './create-component-tree'
 import { DEFAULT_SEGMENT_KEY } from '../../shared/lib/segment'
+import { createComponentTree } from './create-component-tree'
 
 /**
  * Use router state to decide at what common layout to render the page.
@@ -39,9 +37,9 @@ export async function walkTreeWithFlightRouterState({
   injectedJS,
   injectedFontPreloadTags,
   rootLayoutIncluded,
-  asNotFound,
-  metadataOutlet,
+  getMetadataReady,
   ctx,
+  preloadCallbacks,
 }: {
   createSegmentPath: CreateSegmentPath
   loaderTreeToFilter: LoaderTree
@@ -54,9 +52,9 @@ export async function walkTreeWithFlightRouterState({
   injectedJS: Set<string>
   injectedFontPreloadTags: Set<string>
   rootLayoutIncluded: boolean
-  asNotFound?: boolean
-  metadataOutlet: React.ReactNode
+  getMetadataReady: () => Promise<void>
   ctx: AppRenderContext
+  preloadCallbacks: PreloadCallbacks
 }): Promise<FlightDataPath[]> {
   const {
     renderOpts: { nextFontManifest, experimental },
@@ -137,10 +135,10 @@ export async function walkTreeWithFlightRouterState({
 
     if (shouldSkipComponentTree) {
       // Send only the router state
-      return [[overriddenSegment, routerState, null, null, null]]
+      return [[overriddenSegment, routerState, null, null]]
     } else {
       // Create component tree using the slice of the loaderTree
-      const { seedData } = await createComponentTree(
+      const seedData = await createComponentTree(
         // This ensures flightRouterPath is valid and filters down the tree
         {
           ctx,
@@ -153,24 +151,12 @@ export async function walkTreeWithFlightRouterState({
           injectedFontPreloadTags,
           // This is intentionally not "rootLayoutIncludedAtThisLevelOrAbove" as createComponentTree starts at the current level and does a check for "rootLayoutAtThisLevel" too.
           rootLayoutIncluded,
-          asNotFound,
-          metadataOutlet,
+          getMetadataReady,
+          preloadCallbacks,
         }
       )
 
-      // Create head
-      const { layoutOrPagePath } = parseLoaderTree(loaderTreeToFilter)
-      const layerAssets = getLayerAssets({
-        ctx,
-        layoutOrPagePath,
-        injectedCSS: new Set(injectedCSS),
-        injectedJS: new Set(injectedJS),
-        injectedFontPreloadTags: new Set(injectedFontPreloadTags),
-      })
-
-      return [
-        [overriddenSegment, routerState, seedData, rscPayloadHead, layerAssets],
-      ]
+      return [[overriddenSegment, routerState, seedData, rscPayloadHead]]
     }
   }
 
@@ -198,55 +184,51 @@ export async function walkTreeWithFlightRouterState({
     )
   }
 
+  const paths: FlightDataPath[] = []
+
   // Walk through all parallel routes.
-  const paths: FlightDataPath[] = (
-    await Promise.all(
-      parallelRoutesKeys.map(async (parallelRouteKey) => {
-        // for (const parallelRouteKey of parallelRoutesKeys) {
-        const parallelRoute = parallelRoutes[parallelRouteKey]
+  for (const parallelRouteKey of parallelRoutesKeys) {
+    const parallelRoute = parallelRoutes[parallelRouteKey]
 
-        const currentSegmentPath: FlightSegmentPath = isFirst
-          ? [parallelRouteKey]
-          : [actualSegment, parallelRouteKey]
+    const currentSegmentPath: FlightSegmentPath = isFirst
+      ? [parallelRouteKey]
+      : [actualSegment, parallelRouteKey]
 
-        const path = await walkTreeWithFlightRouterState({
-          ctx,
-          createSegmentPath: (child) => {
-            return createSegmentPath([...currentSegmentPath, ...child])
-          },
-          loaderTreeToFilter: parallelRoute,
-          parentParams: currentParams,
-          flightRouterState:
-            flightRouterState && flightRouterState[1][parallelRouteKey],
-          parentRendered: parentRendered || renderComponentsOnThisLevel,
-          isFirst: false,
-          rscPayloadHead,
-          injectedCSS: injectedCSSWithCurrentLayout,
-          injectedJS: injectedJSWithCurrentLayout,
-          injectedFontPreloadTags: injectedFontPreloadTagsWithCurrentLayout,
-          rootLayoutIncluded: rootLayoutIncludedAtThisLevelOrAbove,
-          asNotFound,
-          metadataOutlet,
-        })
+    const subPaths = await walkTreeWithFlightRouterState({
+      ctx,
+      createSegmentPath: (child) => {
+        return createSegmentPath([...currentSegmentPath, ...child])
+      },
+      loaderTreeToFilter: parallelRoute,
+      parentParams: currentParams,
+      flightRouterState:
+        flightRouterState && flightRouterState[1][parallelRouteKey],
+      parentRendered: parentRendered || renderComponentsOnThisLevel,
+      isFirst: false,
+      rscPayloadHead,
+      injectedCSS: injectedCSSWithCurrentLayout,
+      injectedJS: injectedJSWithCurrentLayout,
+      injectedFontPreloadTags: injectedFontPreloadTagsWithCurrentLayout,
+      rootLayoutIncluded: rootLayoutIncludedAtThisLevelOrAbove,
+      getMetadataReady,
+      preloadCallbacks,
+    })
 
-        return path
-          .map((item) => {
-            // we don't need to send over default routes in the flight data
-            // because they are always ignored by the client, unless it's a refetch
-            if (
-              item[0] === DEFAULT_SEGMENT_KEY &&
-              flightRouterState &&
-              !!flightRouterState[1][parallelRouteKey][0] &&
-              flightRouterState[1][parallelRouteKey][3] !== 'refetch'
-            ) {
-              return null
-            }
-            return [actualSegment, parallelRouteKey, ...item]
-          })
-          .filter(Boolean) as FlightDataPath[]
-      })
-    )
-  ).flat()
+    for (const subPath of subPaths) {
+      // we don't need to send over default routes in the flight data
+      // because they are always ignored by the client, unless it's a refetch
+      if (
+        subPath[0] === DEFAULT_SEGMENT_KEY &&
+        flightRouterState &&
+        !!flightRouterState[1][parallelRouteKey][0] &&
+        flightRouterState[1][parallelRouteKey][3] !== 'refetch'
+      ) {
+        continue
+      }
+
+      paths.push([actualSegment, parallelRouteKey, ...subPath])
+    }
+  }
 
   return paths
 }
