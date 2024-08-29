@@ -56,12 +56,12 @@ interface SerializedDefineEnv {
 }
 
 /**
- * Collects all environment variables that are using the `NEXT_PUBLIC_` prefix.
+ * Collects all environment variables that are prefixed with the public environment variable prefix.
  */
-export function getNextPublicEnvironmentVariables(): DefineEnv {
+export function getNextPublicEnvironmentVariables(prefix: string): DefineEnv {
   const defineEnv: DefineEnv = {}
   for (const key in process.env) {
-    if (key.startsWith('NEXT_PUBLIC_')) {
+    if (key.startsWith(prefix)) {
       const value = process.env[key]
       if (value != null) {
         defineEnv[`process.env.${key}`] = value
@@ -139,13 +139,12 @@ export function getDefineEnv({
   isNodeServer,
   middlewareMatchers,
 }: DefineEnvPluginOptions): SerializedDefineEnv {
-  const nextPublicEnv = getNextPublicEnvironmentVariables()
+  const nextPublicEnv = getNextPublicEnvironmentVariables(config.experimental.customPublicEnvPrefix || 'NEXT_PUBLIC_')
   const nextConfigEnv = getNextConfigEnv(config)
 
   const defineEnv: DefineEnv = {
     // internal field to identify the plugin config
     __NEXT_DEFINE_ENV: true,
-
     ...nextPublicEnv,
     ...nextConfigEnv,
     ...(!isEdgeServer

@@ -442,6 +442,7 @@ export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
         staticGenerationMinPagesPerWorker: z.number().int().optional(),
         typedEnv: z.boolean().optional(),
         serverComponentsHmrCache: z.boolean().optional(),
+        customPublicEnvPrefix: z.string().optional(),
       })
       .optional(),
     exportPathMap: z
