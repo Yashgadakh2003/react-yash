@@ -35,6 +35,12 @@ impl<T> ChunkedVec<T> {
         self.chunks.push(chunk);
     }
 
+    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
+    }
+
     pub fn into_iter(self) -> impl Iterator<Item = T> {
         let len = self.len();
         ExactSizeIter {
@@ -52,6 +58,14 @@ impl<T> ChunkedVec<T> {
 
     pub fn is_empty(&self) -> bool {
         self.chunks.first().map_or(true, |chunk| chunk.is_empty())
+    }
+}
+
+impl<T> Extend<T> for ChunkedVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
     }
 }
 

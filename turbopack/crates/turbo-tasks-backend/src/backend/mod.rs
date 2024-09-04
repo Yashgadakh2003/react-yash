@@ -479,6 +479,8 @@ impl TurboTasksBackend {
 
 impl Backend for TurboTasksBackend {
     fn startup(&self, turbo_tasks: &dyn TurboTasksBackendApi<Self>) {
+        self.backing_storage.startup();
+
         // Continue all uncompleted operations
         // They can't be interrupted by a snapshot since the snapshotting job has not been scheduled
         // yet.
@@ -575,6 +577,28 @@ impl Backend for TurboTasksBackend {
             tasks.iter().copied().collect(),
             self.execute_context(turbo_tasks),
         );
+    }
+
+    fn invalidate_serialization(
+        &self,
+        task_id: TaskId,
+        turbo_tasks: &dyn TurboTasksBackendApi<Self>,
+    ) {
+        let ctx = self.execute_context(turbo_tasks);
+        let task = ctx.task(task_id);
+        let cell_data = task.iter().filter_map(|(key, value)| match (key, value) {
+            (CachedDataItemKey::CellData { cell }, CachedDataItemValue::CellData { value }) => {
+                Some(CachedDataUpdate {
+                    task: task_id,
+                    key: CachedDataItemKey::CellData { cell: *cell },
+                    value: Some(CachedDataItemValue::CellData {
+                        value: value.clone(),
+                    }),
+                })
+            }
+            _ => None,
+        });
+        self.persisted_storage_log.lock().extend(cell_data);
     }
 
     fn get_task_description(&self, task: TaskId) -> std::string::String {
