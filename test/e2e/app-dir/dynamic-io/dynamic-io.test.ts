@@ -1,7 +1,5 @@
 import { nextTestSetup } from 'e2e-utils'
 
-process.env.__TEST_SENTINEL = 'at buildtime'
-
 const WITH_PPR = !!process.env.__NEXT_EXPERIMENTAL_PPR
 
 describe('dynamic-io', () => {
@@ -286,86 +284,54 @@ describe('dynamic-io', () => {
 
   if (WITH_PPR) {
     it('should partially prerender pages that use `headers()`', async () => {
-      let $ = await next.render$(
-        '/cases/dynamic_api_headers_boundary',
-        {},
-        {
-          headers: {
-            'x-sentinel': 'my sentinel',
-          },
-        }
-      )
+      let $ = await next.render$('/cases/dynamic_api_headers_boundary')
       if (isNextDev) {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
         expect($('#inner').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       } else {
         expect($('#layout').text()).toBe('at buildtime')
         expect($('#page').text()).toBe('at buildtime')
         expect($('#inner').text()).toBe('at buildtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       }
 
-      $ = await next.render$(
-        '/cases/dynamic_api_headers_root',
-        {},
-        {
-          headers: {
-            'x-sentinel': 'my sentinel',
-          },
-        }
-      )
+      $ = await next.render$('/cases/dynamic_api_headers_root')
       if (isNextDev) {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       } else {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       }
     })
   } else {
     it('should not prerender pages that use `headers()`', async () => {
-      let $ = await next.render$(
-        '/cases/dynamic_api_headers_boundary',
-        {},
-        {
-          headers: {
-            'x-sentinel': 'my sentinel',
-          },
-        }
-      )
+      let $ = await next.render$('/cases/dynamic_api_headers_boundary')
       if (isNextDev) {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
         expect($('#inner').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       } else {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
         expect($('#inner').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       }
 
-      $ = await next.render$(
-        '/cases/dynamic_api_headers_root',
-        {},
-        {
-          headers: {
-            'x-sentinel': 'my sentinel',
-          },
-        }
-      )
+      $ = await next.render$('/cases/dynamic_api_headers_root')
       if (isNextDev) {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       } else {
         expect($('#layout').text()).toBe('at runtime')
         expect($('#page').text()).toBe('at runtime')
-        expect($('#value').text()).toBe('my sentinel')
+        expect($('#value').text()).toBe('hello')
       }
     })
   }
@@ -496,7 +462,9 @@ describe('dynamic-io', () => {
       } else {
         expect($('#layout').text()).toBe('at buildtime')
         expect($('#page').text()).toBe('at buildtime')
-        expect($('#inner').text()).toBe('at runtime')
+        // The second component renders before the first one aborts so we end up
+        // capturing the static value during buildtime
+        expect($('#inner').text()).toBe('at buildtime')
         expect($('#value').text()).toBe('my sentinel')
       }
 
