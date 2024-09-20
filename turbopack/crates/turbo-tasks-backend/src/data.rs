@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use turbo_tasks::{
     event::{Event, EventListener},
+    registry,
     util::SharedError,
-    CellId, KeyValuePair, SharedReference, TaskId, ValueTypeId,
+    CellId, KeyValuePair, TaskId, TypedSharedReference, ValueTypeId,
 };
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,7 +104,7 @@ impl InProgressCellState {
     }
 }
 
-#[derive(Debug, Clone, KeyValuePair)]
+#[derive(Debug, Clone, KeyValuePair, Serialize, Deserialize)]
 pub enum CachedDataItem {
     // Output
     Output {
@@ -131,7 +132,7 @@ pub enum CachedDataItem {
     // Cells
     CellData {
         cell: CellId,
-        value: SharedReference,
+        value: TypedSharedReference,
     },
     CellTypeMaxIndex {
         cell_type: ValueTypeId,
@@ -195,14 +196,17 @@ pub enum CachedDataItem {
     },
 
     // Transient Root Type
+    #[serde(skip)]
     AggregateRoot {
         value: RootState,
     },
 
     // Transient In Progress state
+    #[serde(skip)]
     InProgress {
         value: InProgressState,
     },
+    #[serde(skip)]
     InProgressCell {
         cell: CellId,
         value: InProgressCellState,
@@ -225,6 +229,7 @@ pub enum CachedDataItem {
     },
 
     // Transient Error State
+    #[serde(skip)]
     Error {
         value: SharedError,
     },
@@ -263,6 +268,10 @@ impl CachedDataItem {
             CachedDataItem::OutdatedChild { .. } => false,
             CachedDataItem::Error { .. } => false,
         }
+    }
+
+    pub fn is_optional(&self) -> bool {
+        matches!(self, CachedDataItem::CellData { .. })
     }
 
     pub fn new_scheduled(description: impl Fn() -> String + Sync + Send + 'static) -> Self {
@@ -328,6 +337,9 @@ impl CachedDataItemValue {
     pub fn is_persistent(&self) -> bool {
         match self {
             CachedDataItemValue::Output { value } => !value.is_transient(),
+            CachedDataItemValue::CellData { value } => {
+                registry::get_value_type(value.0).is_serializable()
+            }
             _ => true,
         }
     }
@@ -335,11 +347,7 @@ impl CachedDataItemValue {
 
 #[derive(Debug)]
 pub struct CachedDataUpdate {
-    // TODO persistence
-    #[allow(dead_code)]
     pub task: TaskId,
-    #[allow(dead_code)]
     pub key: CachedDataItemKey,
-    #[allow(dead_code)]
     pub value: Option<CachedDataItemValue>,
 }

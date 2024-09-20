@@ -51,15 +51,60 @@ impl<'a> ExecuteContext<'a> {
     }
 
     pub fn task(&self, task_id: TaskId) -> TaskGuard<'a> {
+        let mut task = self.backend.storage.access_mut(task_id);
+        if !task.persistance_state.is_restored() {
+            if task_id.is_transient() {
+                task.persistance_state.set_restored();
+            } else {
+                // Avoid holding the lock too long since this can also affect other tasks
+                drop(task);
+                let items = self.backend.backing_storage.lookup_data(task_id);
+                task = self.backend.storage.access_mut(task_id);
+                if !task.persistance_state.is_restored() {
+                    for item in items {
+                        task.add(item);
+                    }
+                    task.persistance_state.set_restored();
+                }
+            }
+        }
         TaskGuard {
-            task: self.backend.storage.access_mut(task_id),
+            task,
             task_id,
             backend: self.backend,
         }
     }
 
     pub fn task_pair(&self, task_id1: TaskId, task_id2: TaskId) -> (TaskGuard<'a>, TaskGuard<'a>) {
-        let (task1, task2) = self.backend.storage.access_pair_mut(task_id1, task_id2);
+        let (mut task1, mut task2) = self.backend.storage.access_pair_mut(task_id1, task_id2);
+        let is_restored1 = task1.persistance_state.is_restored();
+        let is_restored2 = task2.persistance_state.is_restored();
+        if !is_restored1 || !is_restored2 {
+            // Avoid holding the lock too long since this can also affect other tasks
+            drop(task1);
+            drop(task2);
+
+            let items1 =
+                (!is_restored1).then(|| self.backend.backing_storage.lookup_data(task_id1));
+            let items2 =
+                (!is_restored2).then(|| self.backend.backing_storage.lookup_data(task_id2));
+
+            let (t1, t2) = self.backend.storage.access_pair_mut(task_id1, task_id2);
+            task1 = t1;
+            task2 = t2;
+            if !task1.persistance_state.is_restored() {
+                for item in items1.unwrap() {
+                    task1.add(item);
+                }
+                task1.persistance_state.set_restored();
+            }
+            if !task2.persistance_state.is_restored() {
+                for item in items2.unwrap() {
+                    task2.add(item);
+                }
+                task2.persistance_state.set_restored();
+            }
+        }
         (
             TaskGuard {
                 task: task1,
@@ -144,10 +189,11 @@ impl<'a> TaskGuard<'a> {
 
     #[must_use]
     pub fn add(&mut self, item: CachedDataItem) -> bool {
-        if !item.is_persistent() {
+        if self.task_id.is_transient() || !item.is_persistent() {
             self.task.add(item)
         } else if self.task.add(item.clone()) {
             let (key, value) = item.into_key_and_value();
+            self.task.persistance_state.add_persisting_item();
             self.backend
                 .persisted_storage_log
                 .lock()
@@ -169,7 +215,7 @@ impl<'a> TaskGuard<'a> {
 
     pub fn insert(&mut self, item: CachedDataItem) -> Option<CachedDataItemValue> {
         let (key, value) = item.into_key_and_value();
-        if !key.is_persistent() {
+        if self.task_id.is_transient() || !key.is_persistent() {
             self.task
                 .insert(CachedDataItem::from_key_and_value(key, value))
         } else if value.is_persistent() {
@@ -177,6 +223,7 @@ impl<'a> TaskGuard<'a> {
                 key.clone(),
                 value.clone(),
             ));
+            self.task.persistance_state.add_persisting_item();
             self.backend
                 .persisted_storage_log
                 .lock()
@@ -190,6 +237,7 @@ impl<'a> TaskGuard<'a> {
             let item = CachedDataItem::from_key_and_value(key.clone(), value);
             if let Some(old) = self.task.insert(item) {
                 if old.is_persistent() {
+                    self.task.persistance_state.add_persisting_item();
                     self.backend
                         .persisted_storage_log
                         .lock()
@@ -211,7 +259,7 @@ impl<'a> TaskGuard<'a> {
         key: &CachedDataItemKey,
         update: impl FnOnce(Option<CachedDataItemValue>) -> Option<CachedDataItemValue>,
     ) {
-        if !key.is_persistent() {
+        if self.task_id.is_transient() || !key.is_persistent() {
             self.task.update(key, update);
             return;
         }
@@ -249,15 +297,16 @@ impl<'a> TaskGuard<'a> {
             new
         });
         if add_persisting_item {
-            // TODO task.persistance_state.add_persisting_item();
+            task.persistance_state.add_persisting_item();
         }
     }
 
     pub fn remove(&mut self, key: &CachedDataItemKey) -> Option<CachedDataItemValue> {
         let old_value = self.task.remove(key);
         if let Some(value) = old_value {
-            if key.is_persistent() && value.is_persistent() {
+            if !self.task_id.is_transient() && key.is_persistent() && value.is_persistent() {
                 let key = key.clone();
+                self.task.persistance_state.add_persisting_item();
                 self.backend
                     .persisted_storage_log
                     .lock()
@@ -283,6 +332,25 @@ impl<'a> TaskGuard<'a> {
 
     pub fn iter(&self) -> impl Iterator<Item = (&CachedDataItemKey, &CachedDataItemValue)> {
         self.task.iter()
+    }
+
+    pub(crate) fn invalidate_serialization(&mut self) {
+        let mut count = 0;
+        let cell_data = self.iter().filter_map(|(key, value)| match (key, value) {
+            (CachedDataItemKey::CellData { cell }, CachedDataItemValue::CellData { value }) => {
+                count += 1;
+                Some(CachedDataUpdate {
+                    task: self.task_id,
+                    key: CachedDataItemKey::CellData { cell: *cell },
+                    value: Some(CachedDataItemValue::CellData {
+                        value: value.clone(),
+                    }),
+                })
+            }
+            _ => None,
+        });
+        self.backend.persisted_storage_log.lock().extend(cell_data);
+        self.task.persistance_state.add_persisting_items(count);
     }
 }
 
@@ -316,6 +384,22 @@ pub enum AnyOperation {
     CleanupOldEdges(cleanup_old_edges::CleanupOldEdgesOperation),
     AggregationUpdate(aggregation_update::AggregationUpdateQueue),
     Nested(Vec<AnyOperation>),
+}
+
+impl AnyOperation {
+    pub fn execute(self, ctx: &ExecuteContext<'_>) {
+        match self {
+            AnyOperation::ConnectChild(op) => op.execute(ctx),
+            AnyOperation::Invalidate(op) => op.execute(ctx),
+            AnyOperation::CleanupOldEdges(op) => op.execute(ctx),
+            AnyOperation::AggregationUpdate(op) => op.execute(ctx),
+            AnyOperation::Nested(ops) => {
+                for op in ops {
+                    op.execute(ctx);
+                }
+            }
+        }
+    }
 }
 
 impl_operation!(ConnectChild connect_child::ConnectChildOperation);
