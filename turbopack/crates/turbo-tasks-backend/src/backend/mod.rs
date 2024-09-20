@@ -537,6 +537,8 @@ impl TurboTasksBackend {
 
 impl Backend for TurboTasksBackend {
     fn startup(&self, turbo_tasks: &dyn TurboTasksBackendApi<Self>) {
+        self.backing_storage.startup();
+
         // Continue all uncompleted operations
         // They can't be interrupted by a snapshot since the snapshotting job has not been scheduled
         // yet.
@@ -610,7 +612,7 @@ impl Backend for TurboTasksBackend {
 
         let task_type = Arc::new(task_type);
         let task_id = self.transient_task_id_factory.get();
-        if let Err(existing_task_id) = self.task_cache.try_insert(task_type, task_id) {
+        if let Err(existing_task_id) = self.task_cache.try_insert(task_type.clone(), task_id) {
             // Safety: We just created the id and failed to insert it.
             unsafe {
                 self.transient_task_id_factory.reuse(task_id);
@@ -618,6 +620,8 @@ impl Backend for TurboTasksBackend {
             self.connect_child(parent_task, existing_task_id, turbo_tasks);
             return existing_task_id;
         }
+
+        println!("{task_id} {task_type:?}");
 
         self.connect_child(parent_task, task_id, turbo_tasks);
 
@@ -1091,7 +1095,7 @@ impl Backend for TurboTasksBackend {
         _: TaskId,
         _: &dyn TurboTasksBackendApi<Self>,
     ) -> AutoMap<RawVc, i32, BuildHasherDefault<FxHasher>, 1> {
-        todo!()
+        Default::default()
     }
 
     fn emit_collectible(
@@ -1101,7 +1105,7 @@ impl Backend for TurboTasksBackend {
         _: TaskId,
         _: &dyn TurboTasksBackendApi<Self>,
     ) {
-        todo!()
+        // todo!("emit_collectible");
     }
 
     fn unemit_collectible(
@@ -1112,7 +1116,7 @@ impl Backend for TurboTasksBackend {
         _: TaskId,
         _: &dyn TurboTasksBackendApi<Self>,
     ) {
-        todo!()
+        // todo!("emit_collectible");
     }
 
     fn update_task_cell(
@@ -1170,7 +1174,8 @@ impl Backend for TurboTasksBackend {
         }
         task_id
     }
+
     fn dispose_root_task(&self, _: TaskId, _: &dyn TurboTasksBackendApi<Self>) {
-        todo!()
+        // todo!("dispose_root_task");
     }
 }

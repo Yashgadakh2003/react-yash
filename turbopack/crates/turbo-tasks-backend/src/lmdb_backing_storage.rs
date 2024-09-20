@@ -5,13 +5,15 @@ use std::{
     error::Error,
     fs::create_dir_all,
     path::Path,
-    sync::Arc,
+    sync::{atomic::AtomicUsize, Arc},
     thread::available_parallelism,
     time::Instant,
 };
 
 use anyhow::{anyhow, Context, Result};
-use lmdb::{Database, DatabaseFlags, Environment, EnvironmentFlags, Transaction, WriteFlags};
+use lmdb::{
+    Cursor, Database, DatabaseFlags, Environment, EnvironmentFlags, Transaction, WriteFlags,
+};
 use tracing::Span;
 use turbo_tasks::{backend::CachedTaskType, KeyValuePair, TaskId};
 
@@ -51,6 +53,8 @@ pub struct LmdbBackingStorage {
     data_db: Database,
     forward_task_cache_db: Database,
     reverse_task_cache_db: Database,
+    restored_tasks: AtomicUsize,
+    restored_cache_entries: AtomicUsize,
 }
 
 impl LmdbBackingStorage {
@@ -79,11 +83,34 @@ impl LmdbBackingStorage {
             data_db,
             forward_task_cache_db,
             reverse_task_cache_db,
+            restored_tasks: AtomicUsize::new(0),
+            restored_cache_entries: AtomicUsize::new(0),
         })
+    }
+
+    fn display_db(&self) -> Result<String> {
+        use std::fmt::Write;
+        let mut result = String::new();
+        let tx = self.env.begin_ro_txn()?;
+        let mut cursor = tx.open_ro_cursor(self.data_db)?;
+        for item_result in cursor.iter() {
+            let (key, value) = item_result?;
+            let task_id = u32::from_be_bytes(key.try_into()?);
+            let data: Vec<CachedDataItem> = pot::from_slice(value)?;
+            write!(result, "### Task {task_id}\n{data:#?}\n\n")?;
+        }
+        Ok(result)
     }
 }
 
 impl BackingStorage for LmdbBackingStorage {
+    fn startup(&self) {
+        println!(
+            "Database content:\n{}",
+            self.display_db().unwrap_or_default()
+        );
+    }
+
     fn next_free_task_id(&self) -> TaskId {
         fn get(this: &LmdbBackingStorage) -> Result<u32> {
             let tx = this.env.begin_rw_txn()?;
@@ -111,6 +138,23 @@ impl BackingStorage for LmdbBackingStorage {
         task_cache_updates: ChunkedVec<(Arc<CachedTaskType>, TaskId)>,
         data_updates: ChunkedVec<CachedDataUpdate>,
     ) -> Result<()> {
+        let restored_cache_entries = self
+            .restored_cache_entries
+            .fetch_and(0, std::sync::atomic::Ordering::Relaxed);
+        println!(
+            "Restored {} tasks, {} cache entries",
+            self.restored_tasks
+                .fetch_and(0, std::sync::atomic::Ordering::Relaxed),
+            restored_cache_entries
+        );
+        if restored_cache_entries > 0 {
+            for (i, (task_type, _)) in task_cache_updates.iter().enumerate() {
+                println!("New Task: {task_type:?}");
+                if i > 10 {
+                    break;
+                }
+            }
+        }
         println!(
             "Persisting {} operations, {} task cache updates, {} data updates...",
             operations.len(),
@@ -303,6 +347,8 @@ impl BackingStorage for LmdbBackingStorage {
         let id = lookup(self, task_type, &span)
             .inspect_err(|err| println!("Looking up task id for {task_type:?} failed: {err:?}"))
             .ok()??;
+        self.restored_cache_entries
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Some(id)
     }
 
@@ -332,6 +378,8 @@ impl BackingStorage for LmdbBackingStorage {
         let result = lookup(self, task_id, &span)
             .inspect_err(|err| println!("Looking up task type for {task_id} failed: {err:?}"))
             .ok()??;
+        self.restored_cache_entries
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Some(result)
     }
 
@@ -359,8 +407,14 @@ impl BackingStorage for LmdbBackingStorage {
             tx.commit()?;
             Ok(result)
         }
-        lookup(self, task_id, &span)
+        let result = lookup(self, task_id, &span)
             .inspect_err(|err| println!("Looking up data for {task_id} failed: {err:?}"))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if !result.is_empty() {
+            println!("restored {task_id}");
+            self.restored_tasks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
     }
 }
