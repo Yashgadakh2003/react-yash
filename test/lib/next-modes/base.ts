@@ -174,6 +174,14 @@ export class NextInstance {
 
         if (skipInstall || skipIsolatedNext) {
           const pkgScripts = (this.packageJson['scripts'] as {}) || {}
+          const nextSwcOverride =
+            process.env.NEXT_TEST_SWC_PACKAGE_NAME &&
+            process.env.NEXT_TEST_SWC_PACKAGE_VERSION
+              ? {
+                  [process.env.NEXT_TEST_SWC_PACKAGE_NAME]:
+                    process.env.NEXT_TEST_SWC_PACKAGE_VERSION,
+                }
+              : undefined
           await fs.mkdir(this.testDir, { recursive: true })
           await fs.writeFile(
             path.join(this.testDir, 'package.json'),
@@ -185,6 +193,7 @@ export class NextInstance {
                   next:
                     process.env.NEXT_TEST_VERSION ||
                     require('next/package.json').version,
+                  ...nextSwcOverride,
                 },
                 ...(this.resolutions ? { resolutions: this.resolutions } : {}),
                 scripts: {
