@@ -47,13 +47,13 @@ export type SearchParams = { [key: string]: string | string[] | undefined }
 export type UnsafeUnwrappedSearchParams<P> =
   P extends Promise<infer U> ? Omit<U, 'then' | 'status' | 'value'> : never
 
-export function reifyClientPrerenderSearchParams(
+export function createPrerenderSearchParamsFromClient(
   staticGenerationStore: StaticGenerationStore
 ) {
   return createPrerenderSearchParams(staticGenerationStore)
 }
 
-export function reifyClientRenderSearchParams(
+export function createRenderSearchParamsFromClient(
   underlying: SearchParams,
   staticGenerationStore: StaticGenerationStore
 ) {
@@ -75,15 +75,27 @@ export function createServerSearchParamsForServerPage(
   }
 }
 
-export function createServerSearchParamsForClientPage(
-  underlying: SearchParams,
+export function createPrerenderSearchParamsForClientPage(
   staticGenerationStore: StaticGenerationStore
 ): Promise<SearchParams> {
-  if (staticGenerationStore.isStaticGeneration) {
-    return createPassthroughPrerenderSearchParams(staticGenerationStore)
-  } else {
-    return Promise.resolve(underlying)
+  if (staticGenerationStore.forceStatic) {
+    // When using forceStatic we override all other logic and always just return an empty
+    // dictionary object.
+    return Promise.resolve({})
   }
+
+  const prerenderStore = prerenderAsyncStorage.getStore()
+  if (prerenderStore) {
+    if (prerenderStore.controller || prerenderStore.cacheSignal) {
+      // We're prerendering in a mode that aborts (dynamicIO) and should stall
+      // the promise to ensure the RSC side is considered dynamic
+      return makeHangingPromise()
+    }
+  }
+  // We're prerendering in a mode that does not aborts. We resolve the promise without
+  // any tracking because we're just transporting a value from server to client where the tracking
+  // will be applied.
+  return Promise.resolve({})
 }
 
 function createPrerenderSearchParams(
@@ -109,29 +121,6 @@ function createPrerenderSearchParams(
   // We are in a legacy static generation and need to interrupt the prerender
   // when search params are accessed.
   return makeErroringExoticSearchParams(staticGenerationStore, prerenderStore)
-}
-
-function createPassthroughPrerenderSearchParams(
-  staticGenerationStore: StaticGenerationStore
-): Promise<SearchParams> {
-  if (staticGenerationStore.forceStatic) {
-    // When using forceStatic we override all other logic and always just return an empty
-    // dictionary object.
-    return Promise.resolve({})
-  }
-
-  const prerenderStore = prerenderAsyncStorage.getStore()
-  if (prerenderStore) {
-    if (prerenderStore.controller || prerenderStore.cacheSignal) {
-      // We're prerendering in a mode that aborts (dynamicIO) and should stall
-      // the promise to ensure the RSC side is considered dynamic
-      return makeHangingPromise()
-    }
-  }
-  // We're prerendering in a mode that does not aborts. We resolve the promise without
-  // any tracking because we're just transporting a value from server to client where the tracking
-  // will be applied.
-  return Promise.resolve({})
 }
 
 function createRenderSearchParams(

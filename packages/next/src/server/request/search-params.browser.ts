@@ -2,7 +2,7 @@ import type { SearchParams } from './search-params'
 
 import { ReflectAdapter } from '../web/spec-extension/adapters/reflect'
 
-export function reifyClientRenderSearchParams(
+export function createRenderSearchParamsFromClient(
   underlying: SearchParams
 ): Promise<SearchParams> {
   if (process.env.NODE_ENV === 'development') {
