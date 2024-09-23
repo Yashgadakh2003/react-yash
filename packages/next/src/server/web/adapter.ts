@@ -6,22 +6,20 @@ import { NextFetchEvent } from './spec-extension/fetch-event'
 import { NextRequest } from './spec-extension/request'
 import { NextResponse } from './spec-extension/response'
 import { relativizeURL } from '../../shared/lib/router/utils/relativize-url'
-import { waitUntilSymbol } from './spec-extension/fetch-event'
+import { waitUntilPromisesSymbol } from './spec-extension/fetch-event'
 import { NextURL } from './next-url'
 import { stripInternalSearchParams } from '../internal-utils'
 import { normalizeRscURL } from '../../shared/lib/router/utils/app-paths'
 import { FLIGHT_HEADERS } from '../../client/components/app-router-headers'
 import { ensureInstrumentationRegistered } from './globals'
-import {
-  withRequestStore,
-  type WrapperRenderOpts,
-} from '../async-storage/with-request-store'
+import { withRequestStore } from '../async-storage/with-request-store'
 import { requestAsyncStorage } from '../../client/components/request-async-storage.external'
 import { getTracer } from '../lib/trace/tracer'
 import type { TextMapGetter } from 'next/dist/compiled/@opentelemetry/api'
 import { MiddlewareSpan } from '../lib/trace/constants'
 import { CloseController } from './web-on-close'
 import { getEdgePreviewProps } from './get-edge-preview-props'
+import type { NextRequestContext } from '../base-http'
 
 export class NextRequestHint extends NextRequest {
   sourcePage: string
@@ -196,7 +194,15 @@ export async function adapter(
     })
   }
 
-  const event = new NextFetchEvent({ request, page: params.page })
+  const event = new NextFetchEvent({
+    request,
+    page: params.page,
+    // if we're in an edge runtime sandbox, we should use the waitUntil
+    // that we receive from the enclosing NextServer
+    context: params.request.waitUntil
+      ? { waitUntil: params.request.waitUntil }
+      : undefined,
+  })
   let response
   let cookiesFromResponse
 
@@ -213,7 +219,7 @@ export async function adapter(
         params.request.nextConfig?.experimental?.after ??
         !!process.env.__NEXT_AFTER
 
-      let waitUntil: WrapperRenderOpts['waitUntil'] = undefined
+      let waitUntil: NextRequestContext['waitUntil'] | undefined = undefined
       let closeController: CloseController | undefined = undefined
 
       if (isAfterEnabled) {
@@ -239,16 +245,18 @@ export async function adapter(
               {
                 req: request,
                 res: undefined,
+                context: {
+                  waitUntil,
+                  onClose: closeController
+                    ? closeController.onClose.bind(closeController)
+                    : undefined,
+                },
                 url: request.nextUrl,
                 renderOpts: {
                   onUpdateCookies: (cookies) => {
                     cookiesFromResponse = cookies
                   },
                   previewProps,
-                  waitUntil,
-                  onClose: closeController
-                    ? closeController.onClose.bind(closeController)
-                    : undefined,
                   experimental: {
                     after: isAfterEnabled,
                   },
@@ -390,7 +398,7 @@ export async function adapter(
 
   return {
     response: finalResponse,
-    waitUntil: Promise.all(event[waitUntilSymbol]),
+    waitUntil: Promise.all(event[waitUntilPromisesSymbol]),
     fetchMetrics: request.fetchMetrics,
   }
 }

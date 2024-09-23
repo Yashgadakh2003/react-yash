@@ -41,19 +41,15 @@ function getMutableCookies(
   return MutableRequestCookiesAdapter.wrap(cookies, onUpdateCookies)
 }
 
-export type WrapperRenderOpts = RequestLifecycleOpts &
-  Partial<
-    Pick<
-      RenderOpts,
-      | 'ComponentMod'
-      | 'onUpdateCookies'
-      | 'assetPrefix'
-      | 'reactLoadableManifest'
-    >
-  > & {
-    experimental: Pick<RenderOpts['experimental'], 'after'>
-    previewProps?: __ApiPreviewProps
-  }
+export type WrapperRenderOpts = Partial<
+  Pick<
+    RenderOpts,
+    'ComponentMod' | 'onUpdateCookies' | 'assetPrefix' | 'reactLoadableManifest'
+  >
+> & {
+  experimental: Pick<RenderOpts['experimental'], 'after'>
+  previewProps?: __ApiPreviewProps
+}
 
 export type RequestContext = RequestResponsePair & {
   /**
@@ -79,8 +75,8 @@ export type RequestContext = RequestResponsePair & {
 }
 
 type RequestResponsePair =
-  | { req: BaseNextRequest; res: BaseNextResponse } // for an app page
-  | { req: NextRequest; res: undefined } // in an api route or middleware
+  | { req: BaseNextRequest; res: BaseNextResponse; context?: undefined } // for an app page
+  | { req: NextRequest; res: undefined; context: Partial<RequestLifecycleOpts> } // in an api route or middleware
 
 /**
  * If middleware set cookies in this request (indicated by `x-middleware-set-cookie`),
@@ -115,16 +111,11 @@ export const withRequestStore: WithStore<RequestStore, RequestContext> = <
   Result,
 >(
   storage: AsyncLocalStorage<RequestStore>,
-  {
-    req,
-    url,
-    res,
-    renderOpts,
-    isHmrRefresh,
-    serverComponentsHmrCache,
-  }: RequestContext,
+  args: RequestContext,
   callback: (store: RequestStore) => Result
 ): Result => {
+  const { req, url, res, renderOpts, isHmrRefresh, serverComponentsHmrCache } =
+    args
   function defaultOnUpdateCookies(cookies: string[]) {
     if (res) {
       res.setHeader('Set-Cookie', cookies)
@@ -198,7 +189,7 @@ export const withRequestStore: WithStore<RequestStore, RequestContext> = <
 
     reactLoadableManifest: renderOpts?.reactLoadableManifest || {},
     assetPrefix: renderOpts?.assetPrefix || '',
-    afterContext: createAfterContext(renderOpts),
+    afterContext: createAfterContext(args),
     isHmrRefresh,
     serverComponentsHmrCache:
       serverComponentsHmrCache ||
@@ -215,12 +206,28 @@ export const withRequestStore: WithStore<RequestStore, RequestContext> = <
 }
 
 function createAfterContext(
-  renderOpts: WrapperRenderOpts | undefined
+  args: RequestResponsePair & Pick<RequestContext, 'renderOpts'>
 ): AfterContext | undefined {
-  if (!isAfterEnabled(renderOpts)) {
+  if (!isAfterEnabled(args.renderOpts)) {
     return undefined
   }
-  const { waitUntil, onClose } = renderOpts
+
+  if (args.context) {
+    return new AfterContext({
+      waitUntil: args.context.waitUntil,
+      onClose: args.context.onClose,
+    })
+  }
+
+  const { req, res } = args
+  // For some reason, `req instanceof BaseNextRequest` is always false here,
+  // so just check for the `context` property instead
+  const waitUntil = 'context' in req ? req.context?.waitUntil : undefined
+
+  // For some reason, `req instanceof BaseNextResponse` is always false here,
+  // so just check for the `onClose` property instead
+  const onClose = 'onClose' in res ? res.onClose.bind(res) : undefined
+
   return new AfterContext({ waitUntil, onClose })
 }
 
