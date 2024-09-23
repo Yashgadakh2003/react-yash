@@ -5,6 +5,9 @@
  * - next/script with `beforeInteractive` strategy
  */
 
+import './components/react-dev-overlay/patch-console'
+import './components/react-dev-overlay/internal/helpers/patch-event-listeners'
+
 const version = process.env.__NEXT_VERSION
 
 window.next = {

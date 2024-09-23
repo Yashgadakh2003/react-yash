@@ -1,7 +1,6 @@
 // imports polyfill from `@next/polyfill-module` after build.
 import '../build/polyfills/polyfill-module'
-import './components/react-dev-overlay/patch-console'
-import './components/react-dev-overlay/internal/helpers/patch-event-listeners'
+
 import ReactDOMClient from 'react-dom/client'
 import React, { use } from 'react'
 // eslint-disable-next-line import/no-extraneous-dependencies

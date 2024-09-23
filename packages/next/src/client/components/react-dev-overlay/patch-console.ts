@@ -7,32 +7,31 @@ const isReactOwnerStackEnabled = !!process.env.__NEXT_REACT_OWNER_STACK
 // Patch console.error to collect information about hydration errors
 let isPatched = false
 function patchConsoleError() {
-  if (isPatched) {
+  // Ensure it's only patched once
+  if (isPatched || typeof window === 'undefined') {
     return
   }
-  // Ensure it's only patched once
-  if (!isPatched) {
-    isPatched = true
-    window.console.error = (...args) => {
-      // See https://github.com/facebook/react/blob/d50323eb845c5fde0d720cae888bf35dedd05506/packages/react-reconciler/src/ReactFiberErrorLogger.js#L78
-      const error =
-        process.env.NODE_ENV !== 'production'
-          ? isReactOwnerStackEnabled
-            ? args[1] || args[0]
-            : args[1]
-          : args[0]
+  isPatched = true
 
-      if (!isNextRouterError(error)) {
-        if (process.env.NODE_ENV !== 'production') {
-          const { storeHydrationErrorStateFromConsoleArgs } =
-            require('./internal/helpers/hydration-error-info') as typeof import('./internal/helpers/hydration-error-info')
+  window.console.error = (...args) => {
+    // See https://github.com/facebook/react/blob/d50323eb845c5fde0d720cae888bf35dedd05506/packages/react-reconciler/src/ReactFiberErrorLogger.js#L78
+    const error =
+      process.env.NODE_ENV !== 'production'
+        ? isReactOwnerStackEnabled
+          ? args[1] || args[0]
+          : args[1]
+        : args[0]
 
-          storeHydrationErrorStateFromConsoleArgs(...args)
-          handleClientError(error)
-        }
+    if (!isNextRouterError(error)) {
+      if (process.env.NODE_ENV !== 'production') {
+        const { storeHydrationErrorStateFromConsoleArgs } =
+          require('./internal/helpers/hydration-error-info') as typeof import('./internal/helpers/hydration-error-info')
 
-        originConsoleError.apply(window.console, args)
+        storeHydrationErrorStateFromConsoleArgs(...args)
+        handleClientError(error)
       }
+
+      originConsoleError.apply(window.console, args)
     }
   }
 }
