@@ -22,7 +22,11 @@ import {
   createServerSearchParamsForClientPage,
   createServerSearchParamsForMetadata,
 } from '../request/search-params'
-import { createDynamicallyTrackedParams } from '../request/fallback-params'
+import {
+  createServerParamsForServerSegment,
+  createServerParamsForClientSegment,
+  createServerParamsForMetadata,
+} from '../request/params'
 import * as serverHooks from '../../client/components/hooks-server-context'
 import { NotFoundBoundary } from '../../client/components/not-found-boundary'
 import { patchFetch as _patchFetch } from '../lib/patch-fetch'
@@ -52,7 +56,9 @@ export {
   createServerSearchParamsForServerPage,
   createServerSearchParamsForClientPage,
   createServerSearchParamsForMetadata,
-  createDynamicallyTrackedParams,
+  createServerParamsForServerSegment,
+  createServerParamsForClientSegment,
+  createServerParamsForMetadata,
   serverHooks,
   preloadStyle,
   preloadFont,

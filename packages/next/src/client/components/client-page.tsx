@@ -8,19 +8,21 @@ import type { Params } from '../../server/request/params'
 
 export function ClientPageRoot({
   Component,
-  params,
   searchParams,
+  params,
+  underlyingParams,
 }: {
   Component: React.ComponentType<any>
-  params: Params
   searchParams: Promise<ParsedUrlQuery>
+  params: Promise<Params>
+  underlyingParams: Params
 }) {
   if (typeof window === 'undefined') {
     const { staticGenerationAsyncStorage } =
       require('./static-generation-async-storage.external') as typeof import('./static-generation-async-storage.external')
 
     let clientSearchParams: Promise<ParsedUrlQuery>
-    let trackedParams: Params
+    let clientParams: Promise<Params>
     // We are going to instrument the searchParams prop with tracking for the
     // appropriate context. We wrap differently in prerendering vs rendering
     const store = staticGenerationAsyncStorage.getStore()
@@ -36,31 +38,33 @@ export function ClientPageRoot({
       const { reifyClientPrerenderSearchParams } =
         require('../../server/request/search-params') as typeof import('../../server/request/search-params')
       clientSearchParams = reifyClientPrerenderSearchParams(store)
+
+      const { reifyClientPrerenderParams } =
+        require('../../server/request/params') as typeof import('../../server/request/params')
+
+      clientParams = reifyClientPrerenderParams(underlyingParams, store)
     } else {
       // We are in a dynamic context and need to unwrap the underlying searchParams
-
-      // We can't type that searchParams is passed but since we control both the definition
-      // of this component and the usage of it we can assume it
-      const underlying = use(searchParams)
-
       const { reifyClientRenderSearchParams } =
         require('../../server/request/search-params') as typeof import('../../server/request/search-params')
-      clientSearchParams = reifyClientRenderSearchParams(underlying, store)
+      clientSearchParams = reifyClientRenderSearchParams(
+        use(searchParams),
+        store
+      )
+      const { reifyClientRenderParams } =
+        require('../../server/request/params') as typeof import('../../server/request/params')
+      clientParams = reifyClientRenderParams(use(params), store)
     }
 
-    const { createDynamicallyTrackedParams } =
-      require('../../server/request/fallback-params') as typeof import('../../server/request/fallback-params')
-
-    trackedParams = createDynamicallyTrackedParams(params)
-    return (
-      <Component params={trackedParams} searchParams={clientSearchParams} />
-    )
+    return <Component params={clientParams} searchParams={clientSearchParams} />
   } else {
-    const underlying = use(searchParams)
-
     const { reifyClientRenderSearchParams } =
       require('../../server/request/search-params.browser') as typeof import('../../server/request/search-params.browser')
-    const clientSearchParams = reifyClientRenderSearchParams(underlying)
-    return <Component params={params} searchParams={clientSearchParams} />
+    const clientSearchParams = reifyClientRenderSearchParams(use(searchParams))
+    const { reifyClientRenderParams } =
+      require('../../server/request/params.browser') as typeof import('../../server/request/params.browser')
+    const clientParams = reifyClientRenderParams(use(params))
+
+    return <Component params={clientParams} searchParams={clientSearchParams} />
   }
 }
