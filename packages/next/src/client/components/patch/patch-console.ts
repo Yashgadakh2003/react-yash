@@ -1,6 +1,6 @@
 import { isNextRouterError } from '../is-next-router-error'
-import { handleClientError } from './internal/helpers/use-error-handler'
-import { originConsoleError } from './original-console-error'
+import { handleClientError } from '../react-dev-overlay/internal/helpers/use-error-handler'
+import { originConsoleError } from '../react-dev-overlay/original-console-error'
 
 const isReactOwnerStackEnabled = !!process.env.__NEXT_REACT_OWNER_STACK
 
@@ -11,7 +11,7 @@ function patchConsoleError() {
   if (isPatched || typeof window === 'undefined') {
     return
   }
-  isPatched = true
+  // isPatched = true
 
   window.console.error = (...args) => {
     // See https://github.com/facebook/react/blob/d50323eb845c5fde0d720cae888bf35dedd05506/packages/react-reconciler/src/ReactFiberErrorLogger.js#L78
@@ -25,7 +25,7 @@ function patchConsoleError() {
     if (!isNextRouterError(error)) {
       if (process.env.NODE_ENV !== 'production') {
         const { storeHydrationErrorStateFromConsoleArgs } =
-          require('./internal/helpers/hydration-error-info') as typeof import('./internal/helpers/hydration-error-info')
+          require('./internal/helpers/hydration-error-info') as typeof import('../react-dev-overlay/internal/helpers/hydration-error-info')
 
         storeHydrationErrorStateFromConsoleArgs(...args)
         handleClientError(error)

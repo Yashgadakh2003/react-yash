@@ -2,9 +2,9 @@ import {
   handleClientError,
   rejectionQueue,
   rejectionHandlers,
-} from './use-error-handler'
+} from '../react-dev-overlay/internal/helpers/use-error-handler'
 
-import { isNextRouterError } from '../../../is-next-router-error'
+import { isNextRouterError } from '../is-next-router-error'
 
 let isPatched = false
 function patchEventListeners() {
