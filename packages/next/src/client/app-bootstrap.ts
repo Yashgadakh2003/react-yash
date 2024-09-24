@@ -5,6 +5,9 @@
  * - next/script with `beforeInteractive` strategy
  */
 
+import './components/patch/patch-console'
+import './components/patch/handle-global-errors'
+
 const version = process.env.__NEXT_VERSION
 
 window.next = {

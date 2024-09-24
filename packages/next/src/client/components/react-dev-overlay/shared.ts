@@ -100,7 +100,7 @@ function pushErrorFilterDuplicates(
   ]
 }
 
-export const INITIAL_OVERLAY_STATE: OverlayState = {
+const INITIAL_OVERLAY_STATE: OverlayState = {
   nextId: 1,
   buildError: null,
   errors: [],
@@ -188,6 +188,8 @@ export function useErrorOverlayReducer() {
     }
   }, INITIAL_OVERLAY_STATE)
 }
+
+export { INITIAL_OVERLAY_STATE }
 
 export const REACT_REFRESH_FULL_RELOAD_FROM_ERROR =
   '[Fast Refresh] performing full reload because your application had an unrecoverable error'
