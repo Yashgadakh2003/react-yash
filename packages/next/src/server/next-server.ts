@@ -1415,7 +1415,7 @@ export default class NextNodeServer extends BaseServer<
       }`
     }
 
-    if (!url.startsWith('http')) {
+    if (!url.startsWith('http') && !url.startsWith('quic')) {
       throw new Error(
         'To use middleware you must provide a `hostname` and `port` to the Next.js Server'
       )
