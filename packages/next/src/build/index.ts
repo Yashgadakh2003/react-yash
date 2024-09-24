@@ -2155,8 +2155,7 @@ export default async function build(
                           if (appConfig.revalidate !== 0) {
                             const isDynamic = isDynamicRoute(page)
                             const hasGenerateStaticParams =
-                              workerResult.prerenderedRoutes &&
-                              workerResult.prerenderedRoutes.length > 0
+                              workerResult.prerenderedRoutes !== undefined
 
                             if (
                               config.output === 'export' &&
