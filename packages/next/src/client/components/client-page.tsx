@@ -1,30 +1,70 @@
 'use client'
 
+import type { ParsedUrlQuery } from 'querystring'
+import { use } from 'react'
+import { InvariantError } from '../../shared/lib/invariant-error'
+
+import type { Params } from '../../server/request/params'
+
 export function ClientPageRoot({
   Component,
-  props,
+  searchParams,
+  params,
+  underlyingParams,
 }: {
   Component: React.ComponentType<any>
-  props: { [props: string]: any }
+  searchParams: Promise<ParsedUrlQuery>
+  params: Promise<Params>
+  underlyingParams: Params
 }) {
   if (typeof window === 'undefined') {
-    const { createDynamicallyTrackedParams } =
-      require('../../server/request/fallback-params') as typeof import('../../server/request/fallback-params')
-    const { createDynamicallyTrackedSearchParams } =
-      require('../../server/request/search-params') as typeof import('../../server/request/search-params')
+    const { staticGenerationAsyncStorage } =
+      require('./static-generation-async-storage.external') as typeof import('./static-generation-async-storage.external')
 
-    // We expect to be passed searchParams but even if we aren't we can construct one from
-    // an empty object. We only do this if we are in a static generation as a performance
-    // optimization. Ideally we'd unconditionally construct the tracked params but since
-    // this creates a proxy which is slow and this would happen even for client navigations
-    // that are done entirely dynamically and we know there the dynamic tracking is a noop
-    // in this dynamic case we can safely elide it.
-    props.searchParams = createDynamicallyTrackedSearchParams(
-      props.searchParams || {}
-    )
-    props.params = props.params
-      ? createDynamicallyTrackedParams(props.params)
-      : {}
+    let clientSearchParams: Promise<ParsedUrlQuery>
+    let clientParams: Promise<Params>
+    // We are going to instrument the searchParams prop with tracking for the
+    // appropriate context. We wrap differently in prerendering vs rendering
+    const store = staticGenerationAsyncStorage.getStore()
+    if (!store) {
+      throw new InvariantError(
+        'Expected staticGenerationStore to exist when handling searchParams in a client Page.'
+      )
+    }
+
+    if (store.isStaticGeneration) {
+      // We are in a prerender context
+      // We need to recover the underlying searchParams from the server
+      const { reifyClientPrerenderSearchParams } =
+        require('../../server/request/search-params') as typeof import('../../server/request/search-params')
+      clientSearchParams = reifyClientPrerenderSearchParams(store)
+
+      const { reifyClientPrerenderParams } =
+        require('../../server/request/params') as typeof import('../../server/request/params')
+
+      clientParams = reifyClientPrerenderParams(underlyingParams, store)
+    } else {
+      // We are in a dynamic context and need to unwrap the underlying searchParams
+      const { reifyClientRenderSearchParams } =
+        require('../../server/request/search-params') as typeof import('../../server/request/search-params')
+      clientSearchParams = reifyClientRenderSearchParams(
+        use(searchParams),
+        store
+      )
+      const { reifyClientRenderParams } =
+        require('../../server/request/params') as typeof import('../../server/request/params')
+      clientParams = reifyClientRenderParams(use(params), store)
+    }
+
+    return <Component params={clientParams} searchParams={clientSearchParams} />
+  } else {
+    const { reifyClientRenderSearchParams } =
+      require('../../server/request/search-params.browser') as typeof import('../../server/request/search-params.browser')
+    const clientSearchParams = reifyClientRenderSearchParams(use(searchParams))
+    const { reifyClientRenderParams } =
+      require('../../server/request/params.browser') as typeof import('../../server/request/params.browser')
+    const clientParams = reifyClientRenderParams(use(params))
+
+    return <Component params={clientParams} searchParams={clientSearchParams} />
   }
-  return <Component {...props} />
 }
