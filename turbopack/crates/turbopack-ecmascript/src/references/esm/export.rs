@@ -280,7 +280,6 @@ async fn get_all_export_names(
         }
         .cell());
     };
-
     let exports = exports.await?;
     let mut esm_exports = IndexMap::new();
     let mut dynamic_exporting_modules = Vec::new();
@@ -312,7 +311,6 @@ async fn get_all_export_names(
         dynamic_exporting_modules
             .extend(star_export_names.dynamic_exporting_modules.iter().copied());
     }
-
     Ok(AllExportNamesResult {
         esm_exports,
         dynamic_exporting_modules,

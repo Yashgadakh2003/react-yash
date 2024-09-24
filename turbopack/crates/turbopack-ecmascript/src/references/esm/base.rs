@@ -13,6 +13,7 @@ use turbopack_core::{
         ChunkItemExt, ChunkableModule, ChunkableModuleReference, ChunkingContext, ChunkingType,
         ChunkingTypeOption,
     },
+    context::AssetContext,
     issue::{
         Issue, IssueExt, IssueSeverity, IssueSource, IssueStage, OptionIssueSource,
         OptionStyledString, StyledString,
@@ -161,8 +162,26 @@ impl ModuleReference for EsmAssetReference {
         }
         let ty = if matches!(self.annotations.module_type(), Some("json")) {
             EcmaScriptModulesReferenceSubType::ImportWithType(ImportWithType::Json)
-        } else if let Some(part) = &self.export_name {
-            EcmaScriptModulesReferenceSubType::ImportPart(*part)
+        } else if let Some(part) = self.export_name {
+            // This is a strange place to handle this, but see https://github.com/vercel/next.js/pull/70336
+            if *part.await? == ModulePart::Evaluation {
+                if let Some(module) = Vc::try_resolve_sidecast::<
+                    Box<dyn crate::EcmascriptChunkPlaceable>,
+                >(self.origin)
+                .await?
+                {
+                    if *module
+                        .is_marked_as_side_effect_free(
+                            self.origin.asset_context().side_effect_free_packages(),
+                        )
+                        .await?
+                    {
+                        return Ok(ModuleResolveResult::ignored().cell());
+                    }
+                }
+            }
+
+            EcmaScriptModulesReferenceSubType::ImportPart(part)
         } else {
             EcmaScriptModulesReferenceSubType::Import
         };
@@ -175,10 +194,12 @@ impl ModuleReference for EsmAssetReference {
                             .await?
                             .expect("EsmAssetReference origin should be a EcmascriptModuleAsset");
 
-                    return Ok(ModuleResolveResult::module(
-                        EcmascriptModulePartAsset::select_part(module, part),
-                    )
-                    .cell());
+                    let part_module = *EcmascriptModulePartAsset::select_part(module, part).await?;
+
+                    return match part_module {
+                        Some(part_module) => Ok(ModuleResolveResult::module(part_module).cell()),
+                        None => Ok(ModuleResolveResult::ignored().cell()),
+                    };
                 }
 
                 bail!("export_name is required for part import")
@@ -195,18 +216,22 @@ impl ModuleReference for EsmAssetReference {
 
         if let Some(part) = self.export_name {
             let part = part.await?;
-            if let &ModulePart::Export(export_name) = &*part {
-                for &module in result.primary_modules().await? {
-                    if let Some(module) = Vc::try_resolve_downcast(module).await? {
-                        let export = export_name.await?;
-                        if *is_export_missing(module, export.clone_value()).await? {
-                            InvalidExport {
-                                export: export_name,
-                                module,
-                                source: self.issue_source,
+            if let &ModulePart::Export(export_name, is_proxy) = &*part {
+                // If is_proxy true, user did not speicifed the exact export name in the direct
+                // import. Instead, they did `export * from './foo'`.
+                if !*is_proxy.await? {
+                    for &module in result.primary_modules().await? {
+                        if let Some(module) = Vc::try_resolve_downcast(module).await? {
+                            let export = export_name.await?;
+                            if *is_export_missing(module, export.clone_value()).await? {
+                                InvalidExport {
+                                    export: export_name,
+                                    module,
+                                    source: self.issue_source,
+                                }
+                                .cell()
+                                .emit();
                             }
-                            .cell()
-                            .emit();
                         }
                     }
                 }

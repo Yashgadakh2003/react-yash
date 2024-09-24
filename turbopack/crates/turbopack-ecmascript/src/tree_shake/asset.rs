@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use turbo_tasks::Vc;
+use turbo_tasks_fs::glob::Glob;
 use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{AsyncModuleInfo, ChunkableModule, ChunkingContext, EvaluatableAsset},
     ident::AssetIdent,
-    module::Module,
+    module::{Module, OptionModule},
     reference::{ModuleReferences, SingleModuleReference},
     resolve::ModulePart,
 };
@@ -99,24 +100,34 @@ impl EcmascriptModulePartAsset {
         .cell()
     }
 
+    /// Returns `None` only if the part is a proxied export. (Which is allowed to not exist)
     #[turbo_tasks::function]
     pub async fn select_part(
         module: Vc<EcmascriptModuleAsset>,
         part: Vc<ModulePart>,
-    ) -> Result<Vc<Box<dyn Module>>> {
+    ) -> Result<Vc<OptionModule>> {
         let split_result = split_module(module).await?;
 
-        Ok(if matches!(&*split_result, SplitResult::Failed { .. }) {
-            Vc::upcast(module)
-        } else {
-            Vc::upcast(EcmascriptModulePartAsset::new(module, part))
-        })
+        Ok(Vc::cell(
+            if matches!(&*split_result, SplitResult::Failed { .. }) {
+                Some(Vc::upcast(module))
+            } else if matches!(&*part.await?, ModulePart::Export(..)) {
+                let part_id = get_part_id(&split_result, part).await?;
+                if part_id.is_some() {
+                    Some(Vc::upcast(EcmascriptModulePartAsset::new(module, part)))
+                } else {
+                    None
+                }
+            } else {
+                Some(Vc::upcast(EcmascriptModulePartAsset::new(module, part)))
+            },
+        ))
     }
 
     #[turbo_tasks::function]
     pub async fn is_async_module(self: Vc<Self>) -> Result<Vc<bool>> {
         let this = self.await?;
-        let result = this.full_module.analyze();
+        let result = analyse_ecmascript_module(this.full_module, Some(this.part));
 
         if let Some(async_module) = *result.await?.async_module.await? {
             Ok(async_module.is_self_async(self.references()))
@@ -199,14 +210,33 @@ impl Module for EcmascriptModulePartAsset {
                 }
             }
 
+            let reference = Vc::upcast(SingleModuleReference::new(
+                Vc::upcast(EcmascriptModulePartAsset::new(
+                    self.full_module,
+                    ModulePart::star_reexports(),
+                )),
+                Vc::cell("reexport".into()),
+            ));
+
+            references.push(reference);
+
             references.extend(analyze.references.await?.iter().cloned());
 
             return Ok(Vc::cell(references));
         }
+
+        if matches!(&*self.part.await?, ModulePart::StarReexports) {
+            return Ok(analyze.references);
+        }
+
         let deps = {
             let part_id = get_part_id(&split_data, self.part)
                 .await
-                .with_context(|| format!("part {:?} is not found in the module", self.part))?;
+                .with_context(|| format!("part {:?} is not found in the module", self.part))?
+                .expect(
+                    "get_part_id should not return None for a part used by \
+                     EcmascriptModulePartAsset",
+                );
 
             match deps.get(&part_id) {
                 Some(v) => &**v,
@@ -223,6 +253,7 @@ impl Module for EcmascriptModulePartAsset {
                         match part_id {
                             PartId::Internal(part_id) => ModulePart::internal(*part_id),
                             PartId::Export(name) => ModulePart::export(name.clone()),
+                            PartId::StarReexports => ModulePart::star_reexports(),
                             _ => unreachable!(
                                 "PartId other than Internal and Export should not be used here"
                             ),
@@ -252,6 +283,26 @@ impl EcmascriptChunkPlaceable for EcmascriptModulePartAsset {
     #[turbo_tasks::function]
     async fn get_exports(self: Vc<Self>) -> Result<Vc<EcmascriptExports>> {
         Ok(self.analyze().await?.exports)
+    }
+
+    #[turbo_tasks::function]
+    async fn is_marked_as_side_effect_free(
+        &self,
+        side_effect_free_packages: Vc<Glob>,
+    ) -> Result<Vc<bool>> {
+        Ok(match *self.part.await? {
+            ModulePart::Evaluation
+            | ModulePart::Facade
+            | ModulePart::Locals
+            | ModulePart::Internal(..) => self
+                .full_module
+                .is_marked_as_side_effect_free(side_effect_free_packages),
+            ModulePart::Export(..)
+            | ModulePart::Exports
+            | ModulePart::StarReexports
+            | ModulePart::RenamedExport { .. }
+            | ModulePart::RenamedNamespace { .. } => Vc::cell(true),
+        })
     }
 }
 
